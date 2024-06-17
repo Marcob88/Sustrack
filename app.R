@@ -132,7 +132,7 @@ plot_spider_chart <- function(countries, years, indicators) {
 
 
 # Define UI
-ui <- nav_panel(
+ui <- navbarPage(
     title = "SUSTRACK - Circular Bioeconomy Monitoring System",
     tabPanel(
         "CBE Dashboard",
