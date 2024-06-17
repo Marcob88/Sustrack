@@ -7,7 +7,7 @@
 #    https://shiny.posit.co/
 #
 
-#rsconnect::setAccountInfo(name='circularbioeconomyindicatorsystem',
+rsconnect::setAccountInfo(name='circularbioeconomyindicatorsystem',
                           #token='068C824643C9D5A39F60F59B01B95416',
                           #secret='qFnwQDwDCLLtJYP/jScHJ4VVE+eKgNFdxjg/XWbt')
 
@@ -35,7 +35,8 @@ library(sp)
 #### SUSTRACK #######################
 
  # SUSTRACK_monitoring_systemQ <- read_csv("C:/Users/109490/OneDrive - Fundacion Tecnalia Research & Innovation/Escritorio/Paper SUSTRACK/SUSTRACK/SUSTRACK monitoring systemR.csv")
-reshaped_df <- readr::read_csv("~/GitHub/sustrack_wp2/modified_data/datasetmerged.csv", locale = locale(encoding = "UTF-8"))
+SUSTRACK_monitoring_systemR <- readr::read_csv("https://raw.githubusercontent.com/Marcob88/Sustrack/main/CBEindicators.csv", locale = locale(encoding = "UTF-8"))
+reshaped_df <- readr::read_csv("https://raw.githubusercontent.com/Marcob88/Sustrack/main/datasetmerged.csv", locale = locale(encoding = "UTF-8"))
 
 
 # Function to generate indicator datasets
@@ -552,8 +553,8 @@ server <- function(input, output) {
     
     # Originally, the data should be read from a github account (github_url <- "https://github.com/Marcob88/Sustrack/blob/main/SUSTRACK%20monitoring%20systemR.csv")
     # As it is now, data is read from a different directory within the same work folder.
-    SUSTRACK_monitoring_systemR <- readr::read_csv("~/GitHub/sustrack_wp2/raw_data//CBEindicators.csv", locale = locale(encoding = "UTF-8"))
-    reshaped_df <- readr::read_csv("~/GitHub/sustrack_wp2/modified_data/datasetmerged.csv", locale = locale(encoding = "UTF-8"))
+    SUSTRACK_monitoring_systemR <- readr::read_csv("https://raw.githubusercontent.com/Marcob88/Sustrack/main/CBEindicators.csv", locale = locale(encoding = "UTF-8"))
+    reshaped_df <- readr::read_csv("https://raw.githubusercontent.com/Marcob88/Sustrack/main/datasetmerged.csv", locale = locale(encoding = "UTF-8"))
     
     filtered_data <- reactive({
         conditions <- list()
