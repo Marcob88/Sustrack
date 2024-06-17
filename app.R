@@ -7,9 +7,9 @@
 #    https://shiny.posit.co/
 #
 
-rsconnect::setAccountInfo(name='circularbioeconomyindicatorsystem',
-                          token='068C824643C9D5A39F60F59B01B95416',
-                          secret='qFnwQDwDCLLtJYP/jScHJ4VVE+eKgNFdxjg/XWbt')
+#rsconnect::setAccountInfo(name='circularbioeconomyindicatorsystem',
+                          #token='068C824643C9D5A39F60F59B01B95416',
+                          #secret='qFnwQDwDCLLtJYP/jScHJ4VVE+eKgNFdxjg/XWbt')
 
 
 library(shiny)
@@ -28,16 +28,110 @@ library(leaflet)
 library(rworldmap)
 library(sf)
 library(plotly)
+library(sp)
 
 
 
 #### SUSTRACK #######################
 
  # SUSTRACK_monitoring_systemQ <- read_csv("C:/Users/109490/OneDrive - Fundacion Tecnalia Research & Innovation/Escritorio/Paper SUSTRACK/SUSTRACK/SUSTRACK monitoring systemR.csv")
+reshaped_df <- readr::read_csv("~/GitHub/sustrack_wp2/modified_data/datasetmerged.csv", locale = locale(encoding = "UTF-8"))
+
+
+# Function to generate indicator datasets
+generate_indicator_datasets <- function(years, indicators) {
+  # Filter data by the selected years
+  filtered_data <- reshaped_df %>% filter(Year %in% years)
+  
+  # Create datasets for each indicator
+  indicator_datasets <- map(indicators, ~{
+    indicator_name <- .x
+    dataset <- filtered_data %>%
+      select(Year, Country, !!sym(indicator_name)) %>%  # Select Year, Country, and the specific indicator
+      drop_na()  # Remove NA values
+    return(dataset)
+  })
+  
+  return(indicator_datasets)
+}
+
+# Function to calculate deciles for each indicator dataset
+calculate_deciles <- function(data) {
+  data %>% 
+    group_by(Year) %>% 
+    mutate(decile = ntile(!!sym(names(data)[3]), 10)) %>%  # Calculate deciles for the third column (indicator)
+    ungroup()
+}
+
+# Function to calculate the area of a polygon
+calculate_polygon_area <- function(x, y) {
+  # Ensure the polygon is closed
+  x <- c(x, x[1])
+  y <- c(y, y[1])
+  
+  # Apply Shoelace formula
+  area <- sum(x[-1] * y[-length(y)]) - sum(x[-length(x)] * y[-1])
+  area <- abs(area) / 2
+  
+  return(area)
+}
+# Function to plot spider chart for specific countries and years
+plot_spider_chart <- function(countries, years, indicators) {
+  # Generate indicator datasets for the selected years
+  indicator_datasets <- generate_indicator_datasets(years, indicators)
+  
+  # Calculate deciles for each indicator dataset
+  indicator_deciles <- map(indicator_datasets, calculate_deciles)
+  
+  # Insert line breaks for long indicator names
+  indicators <- sapply(indicators, function(x) {
+    paste(strwrap(x, width = 20), collapse = "<br>")
+  })
+  
+  # Initialize spider chart
+  spider_chart <- plot_ly(type = 'scatterpolar', fill = 'toself', mode = 'lines+markers', marker = list(symbol = 'circle', size = 8))
+  
+  # Loop through each country and year to add traces to the chart
+  for (country in countries) {
+    for (year in years) {
+      country_deciles <- data.frame(
+        Category = indicators,
+        Decile = sapply(1:length(indicators), function(i) {
+          deciles <- indicator_deciles[[i]]$decile[indicator_deciles[[i]]$Country == country & indicator_deciles[[i]]$Year == year]
+          if (length(deciles) == 0) {
+            return(NA)
+          } else {
+            return(deciles)
+          }
+        }),
+        Year = year,
+        Country = country
+      )
+      
+      # Only add the trace if there is no missing data
+      if (!any(is.na(country_deciles$Decile))) {
+        spider_chart <- spider_chart %>%
+          add_trace(r = country_deciles$Decile, 
+                    theta = country_deciles$Category,
+                    name = paste(country, year))
+      }
+    }
+  }
+  
+  spider_chart <- spider_chart %>%
+    layout(
+      polar = list(radialaxis = list(visible = TRUE, range = c(1, 10), tickmode = 'array', tickvals = 1:10, ticktext = 1:10)),
+      showlegend = TRUE,
+      margin = list(l = 50, r = 50, b = 50, t = 50)  # Adjust margin to increase space around the chart
+    )
+  
+  return(spider_chart)
+}
+
 
 
 # Define UI
-ui <- navbarPage(
+ui <- nav_panel(
     title = "SUSTRACK - Circular Bioeconomy Monitoring System",
     tabPanel(
         "CBE Dashboard",
@@ -100,11 +194,8 @@ ui <- navbarPage(
                                 column(6,
                                        plotlyOutput("scatterplot"))
                             ),
-                            fluidRow(
-                                column(12,
-                                       hr(style = "border-top: 1px solid black; margin-top: 20px; margin-bottom: 20px;")
-                                ),
-                                h2("Managing Natural Resources Sustainably (SO2)"),
+                            hr(style = "border-top: 1px solid black; margin-top: 20px; margin-bottom: 20px;"),
+                            h2("Managing Natural Resources Sustainably (SO2)"),
                                 fluidRow(
                                     column(6,
                                            selectInput("indicator2", "Select Indicator", choices = c(
@@ -162,8 +253,10 @@ ui <- navbarPage(
                                 fluidRow(
                                     column(6,
                                            selectInput("year2", "Select Year", choices = unique(reshaped_df$Year))),
-                                    column(6,
-                                           selectInput("scatterplot_year2", "Select Year for Scatterplot", choices = unique(reshaped_df$Year)))
+                                    column(3,
+                                           selectInput("scatterplot_year2", "Select Year for Scatterplot", choices = unique(reshaped_df$Year))),
+                                    column(3,
+                                           selectInput("selected_country2", "Select Country", choices = c("All", unique(reshaped_df$Country))))
                                 ),
                                 fluidRow(
                                     column(6,
@@ -171,11 +264,9 @@ ui <- navbarPage(
                                     column(6,
                                            plotlyOutput("scatterplot2"))
                                 ),
-                                fluidRow(
-                                    column(12,
-                                           hr(style = "border-top: 1px solid black; margin-top: 20px; margin-bottom: 20px;")
-                                    ),
-                                    h2("Reducing Dependence on Non-renewable Unsustainable Resources (SO3)"),
+                                hr(style = "border-top: 1px solid black; margin-top: 20px; margin-bottom: 20px;"),
+                                h2("Reducing Dependence on Non-renewable Unsustainable Resources (SO3)"),
+
                                     fluidRow(
                                         column(6,
                                                selectInput("indicator3", "Select Indicator", choices = c(
@@ -233,8 +324,10 @@ ui <- navbarPage(
                                     fluidRow(
                                         column(6,
                                                selectInput("year3", "Select Year", choices = unique(reshaped_df$Year))),
-                                        column(6,
-                                               selectInput("scatterplot_year3", "Select Year for Scatterplot", choices = unique(reshaped_df$Year)))
+                                        column(3,
+                                               selectInput("scatterplot_year3", "Select Year for Scatterplot", choices = unique(reshaped_df$Year))),
+                                        column(3,
+                                               selectInput("selected_country3", "Select Country", choices = c("All", unique(reshaped_df$Country))))
                                     ),
                                     fluidRow(
                                         column(6,
@@ -242,11 +335,9 @@ ui <- navbarPage(
                                         column(6,
                                                plotlyOutput("scatterplot3"))
                                     ),
-                                    fluidRow(
-                                        column(12,
-                                               hr(style = "border-top: 1px solid black; margin-top: 20px; margin-bottom: 20px;")
-                                        ),
-                                        h2("Mitigating and Adapting to Climate Change (SO4)"),
+                                    hr(style = "border-top: 1px solid black; margin-top: 20px; margin-bottom: 20px;"),
+                                    h2("Mitigating and Adapting to Climate Change (SO4)"),
+
                                         fluidRow(
                                             column(6,
                                                    selectInput("indicator4", "Select Indicator", choices = c(
@@ -273,8 +364,10 @@ ui <- navbarPage(
                                         fluidRow(
                                             column(6,
                                                    selectInput("year4", "Select Year", choices = unique(reshaped_df$Year))),
-                                            column(6,
-                                                   selectInput("scatterplot_year4", "Select Year for Scatterplot", choices = unique(reshaped_df$Year)))
+                                            column(3,
+                                                   selectInput("scatterplot_year4", "Select Year for Scatterplot", choices = unique(reshaped_df$Year))),
+                                            column(3,
+                                                   selectInput("selected_country4", "Select Country", choices = c("All", unique(reshaped_df$Country))))
                                         ),
                                         fluidRow(
                                             column(6,
@@ -282,11 +375,9 @@ ui <- navbarPage(
                                             column(6,
                                                    plotlyOutput("scatterplot4"))
                                         ),
-                                        fluidRow(
-                                            column(12,
-                                                   hr(style = "border-top: 1px solid black; margin-top: 20px; margin-bottom: 20px;")
-                                            ),
-                                            h2("Strengthening European Competitiveness and Creating Jobs (SO5)"),
+                                        hr(style = "border-top: 1px solid black; margin-top: 20px; margin-bottom: 20px;"),
+                                        h2("Strengthening European Competitiveness and Creating Jobs (SO5)"),
+                                        
                                             fluidRow(
                                                 column(6,
                                                        selectInput("indicator5", "Select Indicator", choices = c(
@@ -309,8 +400,10 @@ ui <- navbarPage(
                                             fluidRow(
                                                 column(6,
                                                        selectInput("year5", "Select Year", choices = unique(reshaped_df$Year))),
-                                                column(6,
-                                                       selectInput("scatterplot_year5", "Select Year for Scatterplot", choices = unique(reshaped_df$Year)))
+                                                column(3,
+                                                       selectInput("scatterplot_year5", "Select Year for Scatterplot", choices = unique(reshaped_df$Year))),
+                                                column(3,
+                                                       selectInput("selected_country5", "Select Country", choices = c("All", unique(reshaped_df$Country))))
                                             ),
                                             fluidRow(
                                                 column(6,
@@ -318,32 +411,41 @@ ui <- navbarPage(
                                                 column(6,
                                                        plotlyOutput("scatterplot5"))
                                             )
-                                        )
-                                    )
-                                )
-                            )
+            
+                                    
+                                
                     ),
                     tabItem(tabName = "country_performance_analysis",
+                            sidebarLayout(
+                              sidebarPanel(
+                                selectInput("countries", "Select Countries", choices = unique(reshaped_df$Country), multiple = TRUE, selected = "EU27(2020)"),
+                                selectInput("years", "Select Years", choices = unique(reshaped_df$Year), multiple = TRUE, selected = 2019),
+                                actionButton("update", "Update", icon = icon("refresh"))  # Add a refresh icon to the update button
+                              ),
+                              mainPanel(
                             h2("Country Performance Analysis"),
-                            fluidRow(
-                                column(12,
-                                       h3("Title to be placed here")
-                                )
-                            ),
-                            fluidRow(
-                                column(4, plotlyOutput("spider_chart_1")),
-                                column(4, plotlyOutput("spider_chart_2")),
-                                column(4, plotlyOutput("spider_chart_3"))
-                            ),
-                            fluidRow(
-                                column(12, HTML("<br>"))
-                            ),
-                            fluidRow(
-                                column(2),
-                                column(4, plotlyOutput("spider_chart_4")),
-                                column(4, plotlyOutput("spider_chart_5"))
+                            
+                            div(style = "margin-bottom: 60px;",
+                                h3(tags$b("Social wellbeing"), style = "color: #337ab7;"),  # Add a blue color to the subtitle
+                                plotlyOutput("spider_chart_1")),
+                            hr(),
+                            div(style = "margin-bottom: 60px;",
+                                h3(tags$b("Sustainable management of resources"), style = "color: #337ab7;"),  # Add a blue color to the subtitle
+                                plotlyOutput("spider_chart_2")),
+                            hr(),
+                            div(style = "margin-bottom: 60px;",
+                                h3(tags$b("Reducing dependence on non-renewable, unsustainable resources"), style = "color: #337ab7;"),  # Add a blue color to the subtitle
+                                plotlyOutput("spider_chart_3")),
+                            hr(),
+                            div(style = "margin-bottom: 60px;margin-top: 30px;",
+                                h3(tags$b("Mitigating and adapting to climate change"), style = "color: #337ab7;"),  # Add a blue color to the subtitle
+                                plotlyOutput("spider_chart_4")),
+                            hr(),
+                            div(style = "margin-bottom: 60px;",
+                                h3(tags$b("Bioeconomy competitiveness"), style = "color: #337ab7;"),  # Add a blue color to the subtitle
+                                plotlyOutput("spider_chart_5"))
                             )
-                    ),
+                    )),
                     
                     tabItem(tabName = "country_specific_analysis",
                             h2("----UNDER CONSTRUCTION----"),
@@ -448,10 +550,10 @@ ui <- navbarPage(
 # Define server logic
 server <- function(input, output) {
     
-    # # Read the dataset from GitHub
-    # github_url <- "https://github.com/Marcob88/Sustrack/blob/main/SUSTRACK%20monitoring%20systemR.csv"
-    SUSTRACK_monitoring_systemR <- readr::read_csv("https://raw.githubusercontent.com/Marcob88/Sustrack/main/CBEindicators.csv", locale = locale(encoding = "UTF-8"))
-    reshaped_df <- readr::read_csv("https://raw.githubusercontent.com/Marcob88/Sustrack/main/datasetmerged.csv", locale = locale(encoding = "UTF-8"))
+    # Originally, the data should be read from a github account (github_url <- "https://github.com/Marcob88/Sustrack/blob/main/SUSTRACK%20monitoring%20systemR.csv")
+    # As it is now, data is read from a different directory within the same work folder.
+    SUSTRACK_monitoring_systemR <- readr::read_csv("~/GitHub/sustrack_wp2/raw_data//CBEindicators.csv", locale = locale(encoding = "UTF-8"))
+    reshaped_df <- readr::read_csv("~/GitHub/sustrack_wp2/modified_data/datasetmerged.csv", locale = locale(encoding = "UTF-8"))
     
     filtered_data <- reactive({
         conditions <- list()
@@ -622,16 +724,19 @@ server <- function(input, output) {
     # Cross-Country Comparison Tab
     
     # Function to render map
-    render_map <- function(selected_indicator, filtered_data) {
+    render_map <- function(selected_indicator, filtered_data, color_scale) {
        
          # Remove rows with NA values for the selected indicator
         filtered_data <- filtered_data[!is.na(filtered_data[[selected_indicator]]), ]
         
-        # Merge data with world map
+        # Create world map and merge data with it. For a finer resolution, the "rworldextra" package may be used.
+        
+        world <- st_as_sf(rworldmap::getMap(resolution = "coarse"))
+        
         map_data <- left_join(world, filtered_data, by = c("ISO_A2" = "Geo_code"))
         
-        # Create color palette
-        color_palette <- colorQuantile("YlOrRd", map_data[[selected_indicator]])
+        # Create color palette. For more color scales check: https://www.datanovia.com/en/blog/top-r-color-palettes-to-know-for-great-data-visualization/
+        color_palette <- colorQuantile(color_scale, map_data[[selected_indicator]])
         
         # Create map
         leaflet(data = map_data) %>%
@@ -658,22 +763,38 @@ server <- function(input, output) {
     }
     
     # Function to render scatterplot
-    render_scatterplot <- function(selected_x_indicator, selected_y_indicator, filtered_data_scatter) {
+    render_scatterplot <- function(selected_x_indicator, selected_y_indicator, filtered_data_scatter, selected_selected_country) {
         # Create scatterplot using plot_ly
-        plot_ly(data = filtered_data_scatter, 
-                x = ~get(selected_x_indicator), 
+        if (selected_selected_country == "All"){
+          country_df <- filtered_data_scatter
+        } else {
+          country_df <- subset(filtered_data_scatter, Country == selected_selected_country)
+        }
+        fig<-plot_ly(data = filtered_data_scatter,
+                x = ~get(selected_x_indicator),
                 y = ~get(selected_y_indicator),
                 text = ~Geo_code,  # Text to display when hovering over points
-                mode = "markers", 
+                mode = "markers",
+                color = I("blue"),
+                type = "scatter",
                 marker = list(size = 10)) %>%
-            layout(title = "Cross-Country Comparison Scatterplot",
+        add_trace(data = country_df, # This trace highlights the point corresponding to the selected country.
+                       x = ~get(selected_x_indicator),
+                       y = ~get(selected_y_indicator),
+                       type = "scatter",
+                       color = I("red"),
+                       mode = "markers", 
+                       marker = list(size = 12)) %>%
+        layout(title = "Cross-Country Comparison Scatterplot",
                    xaxis = list(title = selected_x_indicator, linecolor = "white", gridcolor = "rgba(144,238,144,0.3)"),
                    yaxis = list(title = selected_y_indicator, linecolor = "white", gridcolor = "rgba(144,238,144,0.3)"),
                    plot_bgcolor = "black",  # Set background color to black
                    paper_bgcolor = "black", # Set paper (plot area) color to black
                    font = list(color = "white"), # Set font color to white
+                   showlegend = FALSE,
                    margin = list(l = 50, r = 50, b = 50, t = 50) # Set margins with white color
             )
+        fig
     }
     
     # Map SO1 
@@ -681,7 +802,7 @@ server <- function(input, output) {
         selected_year <- input$year
         selected_indicator <- input$indicator
         filtered_data <- subset(reshaped_df, Year == selected_year)
-        render_map(selected_indicator, filtered_data)
+        render_map(selected_indicator, filtered_data, "YlOrRd")
     })
     
     # Scatterplot 1
@@ -689,12 +810,13 @@ server <- function(input, output) {
         selected_year_scatter <- input$scatterplot_year
         selected_x_indicator <- input$x_indicator
         selected_y_indicator <- input$y_indicator
+        selected_country <- input$selected_country
         
         filtered_data_scatter <- subset(reshaped_df, 
                                         Year == selected_year_scatter & 
                                             !(Geo_code %in% c("EU27_2020", "EU28")))
         
-        render_scatterplot(selected_x_indicator, selected_y_indicator, filtered_data_scatter)
+        render_scatterplot(selected_x_indicator, selected_y_indicator, filtered_data_scatter, selected_country)
     })
     
     # Map SO2 
@@ -702,7 +824,7 @@ server <- function(input, output) {
         selected_year <- input$year2
         selected_indicator <- input$indicator2
         filtered_data <- subset(reshaped_df, Year == selected_year)
-        render_map(selected_indicator, filtered_data)
+        render_map(selected_indicator, filtered_data, "YlGnBu")
     })
     
     # Scatterplot SO2
@@ -710,19 +832,20 @@ server <- function(input, output) {
         selected_year_scatter <- input$scatterplot_year2
         selected_x_indicator <- input$x_indicator2
         selected_y_indicator <- input$y_indicator2
+        selected_country <- input$selected_country2
         
         filtered_data_scatter <- subset(reshaped_df, 
                                         Year == selected_year_scatter & 
                                             !(Geo_code %in% c("EU27_2020", "EU28")))
         
-        render_scatterplot(selected_x_indicator, selected_y_indicator, filtered_data_scatter)
+        render_scatterplot(selected_x_indicator, selected_y_indicator, filtered_data_scatter,selected_country)
     })
     # Map SO3 
     output$map3 <- renderLeaflet({
         selected_year <- input$year3
         selected_indicator <- input$indicator3
         filtered_data <- subset(reshaped_df, Year == selected_year)
-        render_map(selected_indicator, filtered_data)
+        render_map(selected_indicator, filtered_data, "OrRd")
     })
     
     # Scatterplot3
@@ -730,19 +853,20 @@ server <- function(input, output) {
         selected_year_scatter <- input$scatterplot_year3
         selected_x_indicator <- input$x_indicator3
         selected_y_indicator <- input$y_indicator3
+        selected_country <- input$selected_country3
         
         filtered_data_scatter <- subset(reshaped_df, 
                                         Year == selected_year_scatter & 
                                             !(Geo_code %in% c("EU27_2020", "EU28")))
         
-        render_scatterplot(selected_x_indicator, selected_y_indicator, filtered_data_scatter)
+        render_scatterplot(selected_x_indicator, selected_y_indicator, filtered_data_scatter,selected_country)
     })
     # Map SO4 
     output$map4 <- renderLeaflet({
         selected_year <- input$year4
         selected_indicator <- input$indicator4
         filtered_data <- subset(reshaped_df, Year == selected_year)
-        render_map(selected_indicator, filtered_data)
+        render_map(selected_indicator, filtered_data, "Greens")
     })
     
     # Scatterplot4
@@ -750,19 +874,20 @@ server <- function(input, output) {
         selected_year_scatter <- input$scatterplot_year4
         selected_x_indicator <- input$x_indicator4
         selected_y_indicator <- input$y_indicator4
+        selected_country <- input$selected_country4
         
         filtered_data_scatter <- subset(reshaped_df, 
                                         Year == selected_year_scatter & 
                                             !(Geo_code %in% c("EU27_2020", "EU28")))
         
-        render_scatterplot(selected_x_indicator, selected_y_indicator, filtered_data_scatter)
+        render_scatterplot(selected_x_indicator, selected_y_indicator, filtered_data_scatter,selected_country)
     })
     # Map SO5 
     output$map5 <- renderLeaflet({
         selected_year <- input$year5
         selected_indicator <- input$indicator5
         filtered_data <- subset(reshaped_df, Year == selected_year)
-        render_map(selected_indicator, filtered_data)
+        render_map(selected_indicator, filtered_data, "Blues")
     })
     
     # Scatterplot5
@@ -770,73 +895,71 @@ server <- function(input, output) {
         selected_year_scatter <- input$scatterplot_year5
         selected_x_indicator <- input$x_indicator5
         selected_y_indicator <- input$y_indicator5
+        selected_country <- input$selected_country5
         
         filtered_data_scatter <- subset(reshaped_df, 
                                         Year == selected_year_scatter & 
                                             !(Geo_code %in% c("EU27_2020", "EU28")))
         
-        render_scatterplot(selected_x_indicator, selected_y_indicator, filtered_data_scatter)
+        render_scatterplot(selected_x_indicator, selected_y_indicator, filtered_data_scatter,selected_country)
     })
     
-    
+    #Country performance analysis
 
-    # Server logic for spider charts
-    output$spider_chart_1 <- renderPlotly({
-        render_spider_chart("Social Wellbeing")
-    })
-    
-    output$spider_chart_2 <- renderPlotly({
-        render_spider_chart("Sustainable management of resources")
-    })
-    
-    output$spider_chart_3 <- renderPlotly({
-        render_spider_chart("Reducing dependence on unsustainable resources")
-    })
-    
-    output$spider_chart_4 <- renderPlotly({
-        render_spider_chart("Mitigating and adapting to climate change")
-    })
-    
-    output$spider_chart_5 <- renderPlotly({
-        render_spider_chart("Bioeconomy competitiveness")
-    })
-    
-    # Function to render spider chart
-    render_spider_chart <- function(title) {
-        # Creating fake data for spider charts
-        spider_data <- data.frame(
-            Category = c("Indicator 1", "Indicator 2", "Indicator 3", "Indicator 4", "Indicator 5"),
-            Value = runif(5, min = 1, max = 10)  # Generating random values
-        )
-        
-        # Calculate polygon area
-        area <- calculate_polygon_area(spider_data$Value * cos(pi * (0:4)/2), spider_data$Value * sin(pi * (0:4)/2))
-        
-        # Creating spider chart using plot_ly
-        plot_ly(data = spider_data, type = 'scatterpolar', mode = 'lines') %>%
-            add_trace(r = spider_data$Value, theta = spider_data$Category, fill = 'toself') %>%
-            layout(title = paste(title, " (Area:", round(area, 2), ")"),
-                   polar = list(radialaxis = list(visible = TRUE)))
+    # Reactive function to update spider charts
+    update_charts <- function() {
+      output$spider_chart_1 <- renderPlotly({
+        indicators_1 <- c("Agricultural factor income per annual work unit (AWU)", 
+                          "Prevalence of moderate or severe food insecurity in the total population (percentage)", 
+                          "Food purchasing power (food and non-alcoholic beverages)")
+        plot_spider_chart(input$countries, input$years, indicators_1)
+      })
+      
+      output$spider_chart_2 <- renderPlotly({
+        indicators_2 <- c("Share of organic farming in utilised agricultural area (percentage)", 
+                          "Circular material rate (percentage)", 
+                          "Recycling rate of municipal waste", 
+                          "Food services consumption (Food waste) (tonnes)")
+        plot_spider_chart(input$countries, input$years, indicators_2)
+      })
+      
+      output$spider_chart_3 <- renderPlotly({
+        indicators_3 <- c("Domestic Material Consumption (biomass share)", 
+                          "Share of renewable energy in gross final energy consumption", 
+                          "Share of renewables for heating & cooling (percentage)", 
+                          "Share of renewables for electricity (percentage)", 
+                          "Share of renewables for transport (percentage)")
+        plot_spider_chart(input$countries, input$years, indicators_3)
+      })
+      
+      output$spider_chart_4 <- renderPlotly({
+        indicators_4 <- c("Material footprint (Biomass)(kg per dollar of GDP in USD)", 
+                          "net GHG emissions (emissions and removals) from agriculture_CRF3", 
+                          "net GHG emissions (emissions and removals) from LULUCF_CRF4", 
+                          "Water exploitation index (WEI)_PC")
+        plot_spider_chart(input$countries, input$years, indicators_4)
+      })
+      
+      output$spider_chart_5 <- renderPlotly({
+        indicators_5 <- c("Government support to agricultural research and development (by sector) euro per capita", 
+                          "Energy productivity (EUR per KG of oil equivalent)", 
+                          "Share of renewables for transport, electricity and heating & cooling (percent)", 
+                          "Persons employed per bioeconomy sectors_total", 
+                          "Turnover in bioeconomy per sector_total")
+        plot_spider_chart(input$countries, input$years, indicators_5)
+      })
     }
     
-    # Function to calculate the area of a polygon
-    calculate_polygon_area <- function(x, y) {
-        # Ensure the polygon is closed
-        x <- c(x, x[1])
-        y <- c(y, y[1])
-        
-        # Apply Shoelace formula
-        area <- sum(x[-1] * y[-length(y)]) - sum(x[-length(x)] * y[-1])
-        area <- abs(area) / 2
-        
-        return(area)
-    }
+    # Update charts when the button is clicked
+    observeEvent(input$update, {
+      update_charts()
+    })
     
+    # Initial render of the spider charts with default selections
+    update_charts()
     
     
 }
 
 # Run the application
 shinyApp(ui = ui, server = server)
-
-
